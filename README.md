@@ -2,7 +2,6 @@
 
 This repository contains the code for modeling/benchmarking NVIDIA GPU performance and power with dynamic voltage and frequency scaling. The relevant papers are as follows:
 + Q. Wang and X.-W. Chu, "GPGPU Performance Estimation with Core and Memory Frequency Scaling," IEEE International Conference on Parallel and Distributed Systems (ICPADS) 2018, Singapore, Dec 2018.[An extended journal version is under review.]
-+ Q. Wang and X.-W. Chu, "PP-G: Performance and Power Estimation of DVFS-enabled GPU,"(under preparation)
 
 ### Citation
 ```
