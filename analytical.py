@@ -44,17 +44,9 @@ if 'v100' in gpucard:
     GPUCONF = V100()
 
 # experimental test
-#pointer = ['convolutionTexture', 'nn', 'SobolQRNG', 'reduction', 'hotspot'] 
 pointer = []
-#extras = ['backpropBackward', 'binomialOptions', 'cfd', 'eigenvalues', 'gaussian', 'srad', 'dxtc', 'pathfinder', 'scanUniformUpdate', 'stereoDisparity'] 
 extras = ['backpropBackward', 'binomialOptions', 'cfd', 'eigenvalues', 'gaussian', 'srad', 'dxtc', 'pathfinder', 'scanScanExclusiveShared', 'stereoDisparity'] 
-#extras = ['backpropBackward', 'binomialOptions', 'cfd', 'eigenvalues', 'gaussian', 'srad', 'dxtc', 'pathfinder', 'stereoDisparity'] 
-#extras = []
-#extras += ['quasirandomGenerator', 'matrixMulGlobal']
-#extras += ['matrixMulGlobal']
-#extras += ['histogram', 'matrixMulGlobal', 'mergeSort', 'quasirandomGenerator']
 df = df[~df.appName.isin(extras) & ~df.appName.isin(pointer) & (df.coreF>=lowest_core) & (df.memF>=lowest_mem)]
-#df = df[~df.appName.isin(extras) & (df.coreF>=lowest_core) & (df.memF>=lowest_mem)]
 df = df.reset_index(drop=True)
 df = df.sort_values(by = ['appName', 'coreF', 'memF'])
 
@@ -62,34 +54,24 @@ features = pd.DataFrame(columns=['appName', 'coreF', 'memF', 'n_shm_ld', 'n_shm_
 features['appName'] = df['appName']
 features['coreF'] = df['coreF']
 features['memF'] = df['memF']
+
 # shared memory information
 features['n_shm_ld'] = df['shared_load_transactions'] / df['warps']
 features['n_shm_st'] = df['shared_store_transactions'] / df['warps']
 features['n_shm'] = features['n_shm_ld'] + features['n_shm_st']
 
 # global memory information
-#try:
-#    features['n_gld'] = df['gld_transactions'] / df['warps']
-#    features['n_gst'] = df['gst_transactions'] / df['warps']
-#except Exception as e:
-#    features['n_gld'] = df['l2_read_transactions'] / df['warps']
-#    features['n_gst'] = df['l2_write_transactions'] / df['warps']
-
 features['n_gld'] = df['l2_read_transactions'] / df['warps']
 features['n_gst'] = df['l2_write_transactions'] / df['warps']
+
+# texture memory information
 try:
     features['tex_trans'] = df['tex_cache_transactions'] / df['warps'] 
     features.loc[features['tex_trans'] < 0, 'tex_trans'] = 0
 except Exception as e:
     features['tex_trans'] = 0
 
-#features['n_gld'] = (df['l2_read_transactions'] + df['shared_load_transactions']) / df['warps']
-#features['n_gst'] = (df['l2_write_transactions'] + df['shared_store_transactions']) / df['warps']
-
 # l2 information
-#features['l2_miss'] = df['dram_read_transactions'] / df['l2_read_transactions']
-#features['l2_miss'] = df['dram_write_transactions'] / df['l2_write_transactions']
-#features['l2_miss'] = (df['dram_read_transactions'] + df['dram_write_transactions']) / (df['l2_read_transactions'] + df['l2_write_transactions'])
 features['l2_miss'] = (df['dram_read_transactions'] + df['dram_write_transactions']) / ((features['n_gst'] + features['n_gld']) * df['warps'])
 features.loc[features['l2_miss'] > 1, 'l2_miss'] = 1
 features['l2_hit'] = 1 - features['l2_miss']
@@ -98,8 +80,6 @@ features['l2_hit'] = 1 - features['l2_miss']
 try:
     features['fp_insts'] = df['inst_fp_32'] / (df['warps'] * 32.0)
     features['dp_insts'] = df['inst_fp_64'] / (df['warps'] * 32.0)
-    #features['int_insts'] = df['inst_integer'] / (df['warps'] * 32.0)
-    #features['insts'] = features['fp_insts'] + features['dp_insts'] * 2.0 + features['int_insts']
 except Exception as e:
     print "No float/double instruction information..."
 
@@ -122,10 +102,10 @@ features['D_DM'] = (GPUCONF.a_D_DM / df['memF'] + GPUCONF.b_D_DM) * df['coreF'] 
 #features['D_DM'] = (GPUCONF.a_D_DM / GPUCONF.MEM_FREQ + GPUCONF.b_D_DM) * GPUCONF.CORE_FREQ * 1.0 / GPUCONF.MEM_FREQ # no dvfs effect
 
 # add bias to model parameters
-#features['L_DM'] = features['L_DM'] * 1.2
-#features['D_DM'] = features['D_DM'] * 1.2
-#features['act_util'] = features['act_util'] * 1.2
-#features['l2_hit'] = features['l2_hit'] * 0.8 
+#features['L_DM'] = features['L_DM'] * 0.8
+#features['D_DM'] = features['D_DM'] * 0.8
+#features['act_util'] = features['act_util'] * 0.8
+#features['l2_hit'] = features['l2_hit'] * 1.2
 
 # remove shm part if hong2009
 if method == 'hong2009':
@@ -260,9 +240,6 @@ def qiang2018(df):
     #cycles['sm_op'] = df['insts'] * L_INST
     cycles['insts'] = df['insts']
     
-    # add type for offset
-    #cycles['offset'] = None
-
     if "v100" in gpucard:
         lack_thres = 0.25 # for v100, 0.25 gives better results for histogram. 
     else:
@@ -274,9 +251,6 @@ def qiang2018(df):
         # app using many branch instructions, strange for v100
         if (item.appName in ['reduction']) and (not "v100" in gpucard):
             cycles.loc[idx, 'sm_del'] += cycles.loc[idx, 'branch_del'] 
-        # app only have dram write transactions
-        #if item.appName == 'quasirandomGenerator':
-        #    cycles.loc[idx, 'mem_del'] = df.loc[idx, 'n_gst'] * df.loc[idx, 'D_DM'] * GPUCONF.WARPS_MAX * df.loc[idx, 'act_util'] * 1.1
 
         if cycles.loc[idx, 'sm_del'] > cycles.loc[idx, 'mem_del']:
             cycles.loc[idx, 'modelled_cycle'] = cycles.loc[idx, 'sm_del'] #+ cycles.loc[idx, 'avg_mem_lat']
@@ -288,15 +262,14 @@ def qiang2018(df):
         if (item.appName != 'nn') or (cycles.loc[idx, 'modelled_cycle'] < 2800):
             cycles.loc[idx, 'modelled_cycle'] += cycles.loc[idx, 'cold_miss'] 
 
-        #if df.loc[idx, 'act_util'] <= 0.30:
-        #    if cycles.loc[idx, 'sm_del'] + cycles.loc[idx, 'mem_lat'] > cycles.loc[idx, 'sm_lat'] + cycles.loc[idx, 'mem_del']:
-        #        cycles.loc[idx, 'modelled_cycle'] = cycles.loc[idx, 'sm_del'] + cycles.loc[idx, 'mem_lat']
-        #    else:
-        #        cycles.loc[idx, 'modelled_cycle'] = cycles.loc[idx, 'sm_lat'] + cycles.loc[idx, 'mem_del']
+        # L1/tex cache adjustment for v100
+        if ("v100" in gpucard) and (item.appName in ['matrixMulGlobal', 'conjugateGradient', 'histogram']):
+            cycles.loc[idx, 'modelled_cycle'] += cycles.loc[idx, 'tex_del'] 
+        # branch instruction adjustment for v100
+        if ("v100" in gpucard) and (item.appName in ['quasirandomGenerator']):
+            cycles.loc[idx, 'modelled_cycle'] = cycles.loc[idx, 'mem_lat'] + cycles.loc[idx, 'sm_lat']
 
-        #special = ['hotspot', 'convolutionTexture', 'nn']
         if df.loc[idx, 'act_util'] <= lack_thres:
-        #if df.loc[idx, 'appName'] in special:
             lack_wait = 0.5 * cycles.loc[idx, 'avg_mem_lat'] + cycles.loc[idx, 'compute_offset'] + cycles.loc[idx, 'avg_mem_del'] * GPUCONF.WARPS_MAX * df.loc[idx, 'act_util'] + 0.5 * cycles.loc[idx, 'avg_mem_lat'] + (cycles.loc[idx, 'compute_offset'] + cycles.loc[idx, 'avg_mem_lat']) * (df.loc[idx, 'n_gld'] + df.loc[idx, 'n_gst'] - 1) / 4.0
             lack_no_wait = cycles.loc[idx, 'compute_offset'] * (GPUCONF.WARPS_MAX * df.loc[idx, 'act_util'] - 1) + (cycles.loc[idx, 'compute_offset'] + cycles.loc[idx, 'avg_mem_lat']) * (df.loc[idx, 'n_gld'] + df.loc[idx, 'n_gst']) / 4.0
             if lack_wait > lack_no_wait:
@@ -308,31 +281,6 @@ def qiang2018(df):
 
 
     cycles = cycles.sort_values(by=['appName', 'c_to_m'])
-    #for idx, item in df.iterrows():
-    	#cur_name = df['appName'][idx]
-    	#if GPUCONF.eqType[cur_name] == DM_HID:
-    	#	cycles.loc[idx, 'offset'] = -cycles.loc[idx, 'cold_miss']
-    	#elif GPUCONF.eqType[cur_name] == COMP_HID:
-    	#	cycles.loc[idx, 'offset'] = -cycles.loc[idx, 'sm_op']
-    	#elif GPUCONF.eqType[cur_name] == MEM_HID:
-    	#	cycles.loc[idx, 'offset'] = -cycles.loc[idx, 'mem_op']
-    	#elif GPUCONF.eqType[cur_name] == DM_COMP_HID:
-    	#	cycles.loc[idx, 'offset'] = -cycles.loc[idx, 'cold_miss'] -cycles.loc[idx, 'sm_op']
-    	#elif GPUCONF.eqType[cur_name] == MEM_LAT_BOUND:
-    	#	cycles.loc[idx, 'offset'] = -cycles.loc[idx, 'mem_op'] -cycles.loc[idx, 'cold_miss'] +cycles.loc[idx, 'lat_op']
-    	#elif GPUCONF.eqType[cur_name] == NO_HID:
-    	#	cycles.loc[idx, 'offset'] = 0
-    	#elif GPUCONF.eqType[cur_name] == MIX:
-    	#	cycles.loc[idx, 'offset'] = 0
-    	#elif GPUCONF.eqType[cur_name] == COMP_BOUND:
-    	#	cycles.loc[idx, 'offset'] = -cycles.loc[idx, 'sm_op'] - cycles.loc[idx, 'mem_op'] + cycles.loc[idx, 'compute_del']
-    	#elif GPUCONF.eqType[cur_name] == SHM_BOUND:
-    	#	cycles.loc[idx, 'offset'] = -cycles.loc[idx, 'sm_op'] - cycles.loc[idx, 'mem_op'] + cycles.loc[idx, 'shm_del']
-    	#else:
-    	#	print "Invalid modeling type of %s..." % cur_name
-    	#	sys.exit(-1)	
-    
-    #cycles['modelled_cycle'] = cycles['cold_miss'] + cycles['mem_op'] + cycles['sm_op'] + cycles['offset']
 
     return cycles
 
@@ -396,32 +344,12 @@ f.close()
 
 errors = []
 for i in range(len(cycles['modelled_cycle'])):
-        if cycles['appName'][i] in pointer or cycles['appName'][i] in extras:
-            continue
- 
-        #if cycles['coreF'][i] >= 500 and cycles['memF'][i] >= 500:
-	errors.append(cycles['abe'][i])
+    if cycles['appName'][i] in pointer or cycles['appName'][i] in extras:
+        continue
+    
+    #if cycles['coreF'][i] >= 500 and cycles['memF'][i] >= 500:
+    errors.append(cycles['abe'][i])
 
-    	    #print cycles['appName'][i], cycles['coreF'][i], cycles['memF'][i]
-    	    ##print i, df['appName'][i], 'relative error', cycles['abe'][i]
-    	    ## print i, df['appName'][i]
-    	    #print 'n_gld', features['n_gld'][i]
-    	    #print 'n_gst', features['n_gst'][i]
-    	    #print 'l2_hit', features['l2_hit'][i]
-    	    #print 'n_shm_ld', features['n_shm_ld'][i]
-    	    #print 'n_shm_st', features['n_shm_st'][i]
-    	    #print 'insts', features['insts'][i]
-    	    #print 'act_util', features['act_util'][i]
-    	    #print 'dram delay', features['D_DM'][i]
-    	    #print 'dram latency', features['L_DM'][i]
-    	    #print 'coreF', features['coreF'][i]
-    	    #print 'memF', features['memF'][i]
-    	    #print 'mem_del', cycles['mem_del'][i]
-    	    #print 'sm_del', cycles['sm_del'][i]
-    	    #print 'modelled', cycles['modelled_cycle'][i]
-    	    #print 'real', cycles['real_cycle'][i], df['time/ms'][i], "ms"
-    	    #print 'relative error', cycles['abe'][i]
-    	    #print '\n'
  
 pos_50 = int(len(errors) * 0.50) - 1
 pos_75 = int(len(errors) * 0.75) - 1
